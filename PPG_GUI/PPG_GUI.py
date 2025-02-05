@@ -191,7 +191,7 @@ class SerialMonitor(QWidget):
         self.time_buffer.append(self.current_time)
 
         normalized_value = value / 4095.0
-        self.data_buffer.append(normalized_value)
+        self.data_buffer.append(value)
 
         self.raw_data_window.append(normalized_value)
         if len(self.raw_data_window) == 512:

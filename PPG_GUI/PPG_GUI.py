@@ -13,8 +13,12 @@ from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 
 # 載入 PPG 模型
 from PPG_model import DilatedDenoisingAutoencoder
+
 # 載入 BPM 計算
 import BPM_process as BPM
+
+# 載入 filter
+import filter as lpf
 
 # 串口設置
 DEFAULT_BAUD_RATE = 115200
@@ -27,7 +31,7 @@ if getattr(sys, 'frozen', False):  # 是否在 .exe 中執行
 else:
     base_path = os.path.dirname(__file__)
 
-model_path = os.path.join(base_path, "best_model_hybrid_ssim.pth")
+model_path = os.path.join(base_path, "best_model_hybrid_ssim25.pth")
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # model = DilatedDenoisingAutoencoder().to(device)
 model = torch.load(model_path, map_location=device)
@@ -217,6 +221,10 @@ class SerialMonitor(QWidget):
             self.ax1.set_ylim(min_val - padding, max_val + padding)
 
         if len(self.processed_buffer) > 0:  # 確保 processed_buffer 有數據
+
+            processed_array = np.array(self.processed_buffer)
+            filtered_array = lpf.low_pass_filter(processed_array)  # 應用低通濾波
+            self.processed_buffer = deque(filtered_array, maxlen=MAX_DATA_POINTS)
             valid_time = list(self.time_buffer)[-len(self.processed_buffer):]  # 時間對應處理後的數據
             self.ax2.clear()
             self.ax2.plot(valid_time, list(self.processed_buffer), "b-")

@@ -34,7 +34,7 @@ if getattr(sys, 'frozen', False):  # 是否在 .exe 中執行
 else:
     base_path = os.path.dirname(__file__)
 
-model_path = os.path.join(base_path, "best_model_hybrid_ssim25.pth")
+model_path = os.path.join(base_path, "best_model_hybrid_ssim25_all_and_segment.pth")
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model = torch.load(model_path, map_location=device)
 model.eval()

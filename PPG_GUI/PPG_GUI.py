@@ -26,7 +26,7 @@ import filter as lpf
 # 串口設置
 DEFAULT_BAUD_RATE = 115200
 SAMPLE_RATE = 64
-MAX_DATA_POINTS = 320
+MAX_DATA_POINTS = 512
 
 # 加載模型
 if getattr(sys, 'frozen', False):  # 是否在 .exe 中執行
@@ -103,10 +103,12 @@ class SerialMonitor(QWidget):
         # 定期刷新串口
         threading.Thread(target=self.update_ports_thread, daemon=True).start()
 
-        # threading.Thread(target=self.refresh_plot, daemon=True).start()
+        # threading.Thread(target=self.run_model_inference, daemon=True).start()
+
+        threading.Thread(target=self.refresh_plot, daemon=True).start()
         self.timer = QTimer()
         self.timer.timeout.connect(self.refresh_plot)
-        self.timer.start(1000)  # 1s 刷新一次圖表
+        self.timer.start(1000)  # 2s 刷新一次圖表
 
     def initUI(self):
         self.setWindowTitle("PPG GUI Monitor")
@@ -383,7 +385,8 @@ class SerialMonitor(QWidget):
     def save_data(self):
         if len(list(self.raw_data)) >= MAX_DATA_POINTS:
             self.start_index = len(self.raw_data) - MAX_DATA_POINTS
-            print(len(self.raw_data))
+            print(f"raw_data:{len(self.raw_data)}")
+            print(f"processed_data:{len(self.processed_data)}")
         else:
             self.start_index = 0
 
@@ -412,7 +415,7 @@ class SerialMonitor(QWidget):
                 self.text_display.append(f"數據已保存到: {file_path}")
 
     def delete_data(self):
-        """刪除數據但保留圖表結構，避免 refresh_plot 出錯"""
+        """刪除數據並重置所有緩衝區，確保圖表清空"""
         reply = QMessageBox.question(
             self, "刪除資料", "是否要刪除所有數據？",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
@@ -420,31 +423,33 @@ class SerialMonitor(QWidget):
         )
 
         if reply == QMessageBox.StandardButton.Yes: 
-            # 清空 Matplotlib 圖表（保留軸範圍）
+            # 清空 Matplotlib 圖表
             self.ax1.clear()
             self.ax1.set_ylabel("Raw Data")
-            self.ax1.set_xlim(0, MAX_DATA_POINTS)  # 設置 X 軸範圍
-            self.ax1.set_ylim(0, 4095)  # 設置 Y 軸範圍
+            self.ax1.set_xlim(0, MAX_DATA_POINTS)
+            self.ax1.set_ylim(0, 4095)
 
             self.ax2.clear()
             self.ax2.set_ylabel("Processed Data")
             self.ax2.set_xlim(0, MAX_DATA_POINTS)
-            self.ax2.set_ylim(0, 1)  # 設置適當的範圍
+            self.ax2.set_ylim(0, 1)
 
             # 清空數據但保留大小
-            self.raw_data = [0] * MAX_DATA_POINTS
-            self.processed_data = [0] * MAX_DATA_POINTS
-            self.data_buffer = deque([0] * MAX_DATA_POINTS, maxlen=MAX_DATA_POINTS)
-            self.processed_buffer = deque([0] * MAX_DATA_POINTS, maxlen=MAX_DATA_POINTS)
-            self.time_buffer = deque(np.linspace(0, MAX_DATA_POINTS / SAMPLE_RATE, MAX_DATA_POINTS), maxlen=MAX_DATA_POINTS)
+            self.raw_data = []
+            self.processed_data = []
+            self.data_buffer.clear()
+            self.processed_buffer.clear()
+            self.raw_data_window.clear()
+            self.time_buffer.clear()
+
+            # 重置時間
+            self.current_time = 0.0
 
             # 刷新畫布
             self.canvas.draw()
 
             # 清空文本顯示區
             self.text_display.clear()
-
-            # 顯示刪除完成訊息
             self.text_display.append("所有數據已被刪除！")
 
     def start_reading(self):
@@ -541,33 +546,50 @@ class SerialMonitor(QWidget):
         self.canvas.draw()
 
     def update_plot(self, value):
-        """更新數據緩衝區並錄製資料"""
-        self.current_time += 1.0 / SAMPLE_RATE
-        self.time_buffer.append(self.current_time)
+        """更新數據緩衝區並將推論數據加入隊列"""
+        if self.is_recording:
+            self.current_time += 1.0 / SAMPLE_RATE
+            self.time_buffer.append(self.current_time)
 
-        normalized_value = value / 4095.0
-        self.data_buffer.append(value)
-
-        self.raw_data_window.append(normalized_value)
-        if self.is_recording:  # 如果正在錄製，將原始數據保存到列表
+            normalized_value = value / 4095.0
+            self.data_buffer.append(value)
+            self.raw_data_window.append(normalized_value)
             self.raw_data.append(value)
 
-        if len(self.raw_data_window) == 512:
-            self.run_model_inference()
+            if len(self.raw_data_window) == 512:
+                self.run_model_inference()
+                # self.raw_data_window = deque(list(self.raw_data_window)[64:], maxlen=512)
+                # print(f"raw_data_window:{len(self.raw_data_window)}")
 
     def run_model_inference(self):
         """將 512 點的數據送入模型進行推論"""
+        # while True:
+        #     if len(self.raw_data_window) == 512:
         input_tensor = torch.tensor(list(self.raw_data_window), dtype=torch.float32).view(1, 1, 1, 512).to(device)
         with torch.no_grad():
             processed_value = model(input_tensor).cpu().numpy().flatten()
+        value_array = np.array(processed_value)
 
-        self.processed_buffer.extend(processed_value)
+        value_filter = lpf.low_pass_filter(value_array)
 
-        self.processed_data.extend(processed_value) # 儲存所有推論數據
+        buffer = deque(value_filter, maxlen=MAX_DATA_POINTS)
+
+        self.processed_buffer.extend(buffer)
+
+        if len(self.processed_data) == 0:
+            # 第一次推論，儲存 512 筆資料
+            self.processed_data.extend(list(self.processed_buffer))
+            self.text_display.append("第一次推論：儲存所有 512 筆資料")
+        else:
+            # 非第一次推論，儲存最後 1 筆資料
+            self.processed_data.append(self.processed_buffer[-1])
 
     def refresh_plot(self):
         """刷新圖表"""
         if self.is_recording:
+            # if len(self.time_buffer) != len(self.data_buffer):
+            #     self.text_display.append("數據和時間緩衝區長度不一致，已跳過刷新！")
+            #     return
             if len(self.data_buffer) > 0:
                 self.ax1.clear()
                 self.ax1.plot(self.time_buffer, self.data_buffer, "r-")
@@ -580,10 +602,6 @@ class SerialMonitor(QWidget):
                 self.ax1.set_ylim(min_val - padding, max_val + padding)
 
             if len(self.processed_buffer) > 0:  # 確保 processed_buffer 有數據
-
-                processed_array = np.array(self.processed_buffer)
-                filtered_array = lpf.low_pass_filter(processed_array)  # 應用低通濾波
-                self.processed_buffer = deque(filtered_array, maxlen=MAX_DATA_POINTS)
                 valid_time = list(self.time_buffer)[-len(self.processed_buffer):]  # 時間對應處理後的數據
                 self.ax2.clear()
                 self.ax2.plot(valid_time, list(self.processed_buffer), "b-")
@@ -594,10 +612,7 @@ class SerialMonitor(QWidget):
                 max_val_proc = max(self.processed_buffer)
                 padding_proc = (max_val_proc - min_val_proc) * 0.1  # 增加 10% 的範圍
                 self.ax2.set_ylim(min_val_proc - padding_proc, max_val_proc + padding_proc)
-                # self.ax2.set_ylim(0, 1)
 
-                # 列印推論結果（最新 5 筆）
-                # print("推論結果 (最新 5 筆):", list(self.processed_buffer)[-5:])
 
                 heart_rate_kal, heart_rate_raw = BPM.process_heart_rate(self.processed_buffer)
                 # print(f"Heart Rate (BPM): {heart_rate}")

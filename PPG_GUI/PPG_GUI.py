@@ -568,21 +568,23 @@ class SerialMonitor(QWidget):
 
     def _process_data(self):
         """ 真正執行數據處理的函數，當 `Queue` 清空後關閉執行緒 """
-        while self.processing_event.is_set():    
-            if not self.data_queue.empty():
-                value =  self.data_queue.get()
+        while self.processing_event.is_set():
+            batch = []    
+            while  not self.data_queue.empty() and len(batch) < SAMPLE_RATE:
+                batch.extend(self.data_queue.get())
                 self.data_queue.task_done()
 
                 # 轉換成正規化數據
-                normalized_values = [float(v) / 4095.00 for v in value]
+                batch = list(batch)
+                normalized_values = [float(v) / 4095.00 for v in batch]
 
                 # 存入數據緩衝區
                 self.raw_data_window.extend(normalized_values)
-                self.data_buffer.extend(value)
-                self.raw_data.extend(value)
+                self.data_buffer.extend(batch)
+                self.raw_data.extend(batch)
 
                 # 更新時間數據
-                new_times = [self.current_time + (i / SAMPLE_RATE) for i in range(len(value))]
+                new_times = [self.current_time + (i / SAMPLE_RATE) for i in range(len(batch))]
                 self.time_buffer.extend(new_times)
                 self.current_time = self.time_buffer[-1]  # 更新到最新時間
 
@@ -617,9 +619,7 @@ class SerialMonitor(QWidget):
         """刷新圖表"""
         if self.is_recording:
             if len(self.data_buffer) > 0:
-
                 valid_time = list(self.time_buffer)[-len(self.data_buffer):]
-
                 self.ax1.clear()
                 self.ax1.plot(valid_time, self.data_buffer, "r-")
                

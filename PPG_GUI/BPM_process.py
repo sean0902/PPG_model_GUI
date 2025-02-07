@@ -13,7 +13,7 @@ def bandpass_filter(signal, lowcut=0.5, highcut=3.0, fs=64, order=4):
     return filtfilt(b, a, signal)
  
 class SciPyKalmanFilter:
-    def __init__(self, process_variance=2, measurement_variance=5):
+    def __init__(self, process_variance=1, measurement_variance=10):
         """
         使用 Kalman 濾波平滑心率變化
         :param process_variance: 狀態轉移過程的變異數 (越小，濾波越平滑)
@@ -22,7 +22,7 @@ class SciPyKalmanFilter:
         self.process_variance = process_variance
         self.measurement_variance = measurement_variance
         self.kalman_gain = None
-        self.estimate = None
+        self.estimate = 75
 
     def update(self, measured_hr):
         """
@@ -41,7 +41,7 @@ class SciPyKalmanFilter:
         return self.estimate
 
 
-def compute_heart_rate_stft(filtered_signal, fs=64, window_size=4, overlap=2, method="weighted_mean"):
+def compute_heart_rate_stft(filtered_signal, fs=64, window_size=6, overlap=2, method="weighted_mean"):
     """
     使用 STFT (短時傅立葉變換) 計算心率 (Heart Rate)。
 
@@ -58,7 +58,7 @@ def compute_heart_rate_stft(filtered_signal, fs=64, window_size=4, overlap=2, me
     noverlap = overlap * fs  # 重疊樣本數
 
     # 2. 計算 STFT
-    f, t, Zxx = stft(filtered_signal, fs=fs, nperseg=nperseg, noverlap=noverlap, nfft=4096)
+    f, t, Zxx = stft(filtered_signal, fs=fs, nperseg=nperseg, noverlap=noverlap, nfft=512)
 
     # 3. 取頻譜幅值
     magnitude = np.abs(Zxx)

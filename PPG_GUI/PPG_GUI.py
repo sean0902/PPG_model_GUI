@@ -6,6 +6,7 @@ import threading
 import numpy as np
 import torch
 import pandas as pd
+import queue
 from collections import deque
 from datetime import datetime
 from PyQt6.QtWidgets import (
@@ -86,14 +87,17 @@ class SerialMonitor(QWidget):
         self.initUI()
         self.serial_reader = None
         self.selected_port = None
+        
+        self.data_sample = deque(maxlen=MAX_DATA_POINTS)
         self.data_buffer = deque(maxlen=MAX_DATA_POINTS)
         self.time_buffer = deque(maxlen=MAX_DATA_POINTS)
         self.processed_buffer = deque(maxlen=MAX_DATA_POINTS)
-        self.raw_data_window = deque(maxlen=512)
+        self.raw_data_window = deque(maxlen=MAX_DATA_POINTS)
         self.current_time = 0.0
 
         self.raw_data = []  # 用於儲存錄製的原始數據
         self.processed_data = [] # 用於儲存推論後的數據
+        self.data_queue = queue.Queue()
 
         self.is_recording = False
         self.is_load_data = False
@@ -103,12 +107,13 @@ class SerialMonitor(QWidget):
         # 定期刷新串口
         threading.Thread(target=self.update_ports_thread, daemon=True).start()
 
-        # threading.Thread(target=self.run_model_inference, daemon=True).start()
+        self.processing_thread = None
+        self.processing_event = threading.Event()  # 用來控制執行緒狀態
 
-        threading.Thread(target=self.refresh_plot, daemon=True).start()
+        # threading.Thread(target=self.refresh_plot, daemon=True).start()
         self.timer = QTimer()
         self.timer.timeout.connect(self.refresh_plot)
-        self.timer.start(1000)  # 2s 刷新一次圖表
+        self.timer.start(1000)  # 1s 刷新一次圖表
 
     def initUI(self):
         self.setWindowTitle("PPG GUI Monitor")
@@ -363,7 +368,6 @@ class SerialMonitor(QWidget):
 
         self.setLayout(main_layout)
 
-
     def refresh_ports(self):
         self.port_selector.clear()
         ports = serial.tools.list_ports.comports()
@@ -548,23 +552,48 @@ class SerialMonitor(QWidget):
     def update_plot(self, value):
         """更新數據緩衝區並將推論數據加入隊列"""
         if self.is_recording:
-            self.current_time += 1.0 / SAMPLE_RATE
-            self.time_buffer.append(self.current_time)
+            if len(self.data_sample) < SAMPLE_RATE:
+                self.data_sample.append(value)
+            else:
+                self.data_queue.put(self.data_sample)
+                self.data_processed()
+                self.data_sample.clear()
 
-            normalized_value = value / 4095.0
-            self.data_buffer.append(value)
-            self.raw_data_window.append(normalized_value)
-            self.raw_data.append(value)
+    def data_processed(self):
+        """ 啟動獨立執行緒處理數據 """
+        if self.processing_thread is None or not self.processing_thread.is_alive():
+            self.processing_event.set()  # 啟動處理事件
+            self.processing_thread = threading.Thread(target=self._process_data, daemon=True)
+            self.processing_thread.start()
 
-            if len(self.raw_data_window) == 512:
-                self.run_model_inference()
-                # self.raw_data_window = deque(list(self.raw_data_window)[64:], maxlen=512)
-                # print(f"raw_data_window:{len(self.raw_data_window)}")
+    def _process_data(self):
+        """ 真正執行數據處理的函數，當 `Queue` 清空後關閉執行緒 """
+        while self.processing_event.is_set():    
+            if not self.data_queue.empty():
+                value =  self.data_queue.get()
+                self.data_queue.task_done()
+
+                # 轉換成正規化數據
+                normalized_values = [float(v) / 4095.00 for v in value]
+
+                # 存入數據緩衝區
+                self.raw_data_window.extend(normalized_values)
+                self.data_buffer.extend(value)
+                self.raw_data.extend(value)
+
+                # 更新時間數據
+                new_times = [self.current_time + (i / SAMPLE_RATE) for i in range(len(value))]
+                self.time_buffer.extend(new_times)
+                self.current_time = self.time_buffer[-1]  # 更新到最新時間
+
+                if len(self.raw_data_window) == MAX_DATA_POINTS:
+                    self.run_model_inference()
+            else:
+                # 當 Queue 空了，關閉處理執行緒
+                self.processing_event.clear()
 
     def run_model_inference(self):
         """將 512 點的數據送入模型進行推論"""
-        # while True:
-        #     if len(self.raw_data_window) == 512:
         input_tensor = torch.tensor(list(self.raw_data_window), dtype=torch.float32).view(1, 1, 1, 512).to(device)
         with torch.no_grad():
             processed_value = model(input_tensor).cpu().numpy().flatten()
@@ -578,46 +607,48 @@ class SerialMonitor(QWidget):
 
         if len(self.processed_data) == 0:
             # 第一次推論，儲存 512 筆資料
-            self.processed_data.extend(list(self.processed_buffer))
+            self.processed_data.extend(list(value_filter))
             self.text_display.append("第一次推論：儲存所有 512 筆資料")
         else:
-            # 非第一次推論，儲存最後 1 筆資料
-            self.processed_data.append(self.processed_buffer[-1])
+            # 非第一次推論，儲存最後 64 筆資料
+            self.processed_data.extend(value_filter[-64:])
 
     def refresh_plot(self):
         """刷新圖表"""
         if self.is_recording:
-            # if len(self.time_buffer) != len(self.data_buffer):
-            #     self.text_display.append("數據和時間緩衝區長度不一致，已跳過刷新！")
-            #     return
             if len(self.data_buffer) > 0:
-                self.ax1.clear()
-                self.ax1.plot(self.time_buffer, self.data_buffer, "r-")
-                self.ax1.set_ylabel("Raw Data")
 
+                valid_time = list(self.time_buffer)[-len(self.data_buffer):]
+
+                self.ax1.clear()
+                self.ax1.plot(valid_time, self.data_buffer, "r-")
+               
                 # 計算 Raw Data 的最小/最大值，並給 10% padding
                 min_val = min(self.data_buffer)
                 max_val = max(self.data_buffer)
                 padding = (max_val - min_val) * 0.1  # 增加 10% 的範圍，防止數據貼邊
                 self.ax1.set_ylim(min_val - padding, max_val + padding)
+                self.ax1.set_ylabel("Raw Data")
+                
+                self.ax1.relim()
+                self.ax1.autoscale_view()
 
             if len(self.processed_buffer) > 0:  # 確保 processed_buffer 有數據
                 valid_time = list(self.time_buffer)[-len(self.processed_buffer):]  # 時間對應處理後的數據
                 self.ax2.clear()
                 self.ax2.plot(valid_time, list(self.processed_buffer), "b-")
-                self.ax2.set_ylabel("Processed Data")
-
+                
                 # 計算模型輸出的最小/最大值，並給 10% padding
                 min_val_proc = min(self.processed_buffer)
                 max_val_proc = max(self.processed_buffer)
                 padding_proc = (max_val_proc - min_val_proc) * 0.1  # 增加 10% 的範圍
                 self.ax2.set_ylim(min_val_proc - padding_proc, max_val_proc + padding_proc)
-
-
+                self.ax2.set_ylabel("Processed Data") 
+                     
+                #計算心率
                 heart_rate_kal, heart_rate_raw = BPM.process_heart_rate(self.processed_buffer)
-                # print(f"Heart Rate (BPM): {heart_rate}")
                 self.bpm_label_kal.setText(f"Heart Rate kalman: {heart_rate_kal} BPM")
-                self.bpm_label_raw.setText(f"Heart Rate raw: {heart_rate_raw} BPM")
+                self.bpm_label_raw.setText(f"Heart Rate raw: {round(heart_rate_raw, 1)} BPM")
 
             self.canvas.draw()
 

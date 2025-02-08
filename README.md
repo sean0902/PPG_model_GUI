@@ -1,7 +1,7 @@
 # 綠光PPG_model_GUI
 
-**執行檔連結**
-https://drive.google.com/drive/folders/1uGHAQIF0yEvxKDxtnc94AtBZzXllGu62?usp=drive_link
+**執行檔下載連結**
+ https://drive.google.com/drive/folders/1uGHAQIF0yEvxKDxtnc94AtBZzXllGu62?usp=drive_link
 
 **功能**
 1. raw data

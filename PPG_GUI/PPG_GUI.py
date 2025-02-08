@@ -376,15 +376,16 @@ class SerialMonitor(QWidget):
     
     def start_recording_and_reading(self):
         """開始錄製並讀取資料"""
-        self.is_recording = True
-        self.raw_data = []  # 清空錄製數據
-        self.start_reading()  # 開始讀取資料
+        if not self.is_recording:
+            self.is_recording = True
+            self.start_reading()  # 開始讀取資料
 
     def stop_recording_and_reading(self):
         """停止錄製並讀取資料"""
-        self.is_recording = False
-        self.stop_reading()  # 停止讀取資料
-        self.save_data()
+        if self.is_recording:
+            self.is_recording = False
+            self.stop_reading()  # 停止讀取資料
+            self.save_data()
 
     def save_data(self):
         """存儲資料"""

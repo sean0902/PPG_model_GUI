@@ -387,74 +387,77 @@ class SerialMonitor(QWidget):
         self.save_data()
 
     def save_data(self):
-        if len(list(self.raw_data)) >= MAX_DATA_POINTS:
-            self.start_index = len(self.raw_data) - MAX_DATA_POINTS
-            print(f"raw_data:{len(self.raw_data)}")
-            print(f"processed_data:{len(self.processed_data)}")
-        else:
-            self.start_index = 0
+        """存儲資料"""
+        if not self.is_recording:
+            if len(list(self.raw_data)) >= MAX_DATA_POINTS:
+                self.start_index = len(self.raw_data) - MAX_DATA_POINTS
+                # print(f"raw_data:{len(self.raw_data)}")
+                # print(f"processed_data:{len(self.processed_data)}")
+            else:
+                self.start_index = 0
 
-        timestamp = datetime.now().strftime("%Y_%m_%d__%H_%M_%S")
-        
-        default_filename  = f"ppg_data_{timestamp}.csv"
+            timestamp = datetime.now().strftime("%Y_%m_%d__%H_%M_%S")
+            
+            default_filename  = f"ppg_data_{timestamp}.csv"
 
-        reply = QMessageBox.question(
-            self, "儲存數據", "是否要儲存錄製的數據？", 
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, 
-            QMessageBox.StandardButton.Yes
-        )
+            reply = QMessageBox.question(
+                self, "儲存數據", "是否要儲存錄製的數據？", 
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, 
+                QMessageBox.StandardButton.Yes
+            )
 
-        if reply == QMessageBox.StandardButton.Yes:
-            file_path, _ = QFileDialog.getSaveFileName(self, "保存 PPG 數據", default_filename, "CSV Files (*.csv)")
-            if file_path:
-                # 確保 raw_data 和 processed_data 長度一致
-                min_length = min(len(self.raw_data), len(self.processed_data))
-                raw_trimmed = self.raw_data[:min_length]
-                processed_trimmed = self.processed_data[:min_length]
+            if reply == QMessageBox.StandardButton.Yes:
+                file_path, _ = QFileDialog.getSaveFileName(self, "保存 PPG 數據", default_filename, "CSV Files (*.csv)")
+                if file_path:
+                    # 確保 raw_data 和 processed_data 長度一致
+                    min_length = min(len(self.raw_data), len(self.processed_data))
+                    raw_trimmed = self.raw_data[:min_length]
+                    processed_trimmed = self.processed_data[:min_length]
 
-                # 合併數據並存檔
-                df = pd.DataFrame({"Raw Data": raw_trimmed, "Processed Data": processed_trimmed})
-                df.to_csv(file_path, index=False)
+                    # 合併數據並存檔
+                    df = pd.DataFrame({"Raw Data": raw_trimmed, "Processed Data": processed_trimmed})
+                    df.to_csv(file_path, index=False)
 
-                self.text_display.append(f"數據已保存到: {file_path}")
+                    self.text_display.append(f"數據已保存到: {file_path}")
 
     def delete_data(self):
         """刪除數據並重置所有緩衝區，確保圖表清空"""
-        reply = QMessageBox.question(
-            self, "刪除資料", "是否要刪除所有數據？",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.Yes
-        )
+        if not self.is_recording:
+            reply = QMessageBox.question(
+                self, "刪除資料", "是否要刪除所有數據？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes
+            )
 
-        if reply == QMessageBox.StandardButton.Yes: 
-            # 清空 Matplotlib 圖表
-            self.ax1.clear()
-            self.ax1.set_ylabel("Raw Data")
-            self.ax1.set_xlim(0, MAX_DATA_POINTS)
-            self.ax1.set_ylim(0, 4095)
+            if reply == QMessageBox.StandardButton.Yes: 
+                # 清空 Matplotlib 圖表
+                self.ax1.clear()
+                self.ax1.set_ylabel("Raw Data")
+                self.ax1.set_xlim(0, MAX_DATA_POINTS)
+                self.ax1.set_ylim(0, 4095)
 
-            self.ax2.clear()
-            self.ax2.set_ylabel("Processed Data")
-            self.ax2.set_xlim(0, MAX_DATA_POINTS)
-            self.ax2.set_ylim(0, 1)
+                self.ax2.clear()
+                self.ax2.set_ylabel("Processed Data")
+                self.ax2.set_xlim(0, MAX_DATA_POINTS)
+                self.ax2.set_ylim(0, 1)
 
-            # 清空數據但保留大小
-            self.raw_data = []
-            self.processed_data = []
-            self.data_buffer.clear()
-            self.processed_buffer.clear()
-            self.raw_data_window.clear()
-            self.time_buffer.clear()
+                # 清空數據但保留大小
+                self.raw_data = []
+                self.processed_data = []
+                self.data_buffer.clear()
+                self.processed_buffer.clear()
+                self.raw_data_window.clear()
+                self.time_buffer.clear()
 
-            # 重置時間
-            self.current_time = 0.0
+                # 重置時間
+                self.current_time = 0.0
 
-            # 刷新畫布
-            self.canvas.draw()
+                # 刷新畫布
+                self.canvas.draw()
 
-            # 清空文本顯示區
-            self.text_display.clear()
-            self.text_display.append("所有數據已被刪除！")
+                # 清空文本顯示區
+                self.text_display.clear()
+                self.text_display.append("所有數據已被刪除！")
 
     def start_reading(self):
         """開始串口讀取"""
@@ -493,39 +496,42 @@ class SerialMonitor(QWidget):
 
     def load_data(self):
         """讀取 CSV 檔案並拆分成 raw_data 和 processed_data"""
-        file_path, _ = QFileDialog.getOpenFileName(self, "選擇 PPG 數據檔案", "", "CSV Files (*.csv)")
-        
-        if file_path:
-            try:
-                # 讀取 CSV 檔案
-                df = pd.read_csv(file_path)
+        if not self.is_recording:
+            file_path, _ = QFileDialog.getOpenFileName(self, "選擇 PPG 數據檔案", "", "CSV Files (*.csv)")
+            
+            if file_path:
+                try:
+                    # 讀取 CSV 檔案
+                    df = pd.read_csv(file_path)
 
-                # 確保 CSV 內有 "Raw Data" 和 "Processed Data" 這兩欄
-                if "Raw Data" in df.columns and "Processed Data" in df.columns:
-                    self.raw_data = df["Raw Data"].tolist()
-                    self.processed_data = df["Processed Data"].tolist()
-                    self.is_load_data = True
-                    self.start_index = 0  # 重置索引
-                    self.plot_data()
+                    # 確保 CSV 內有 "Raw Data" 和 "Processed Data" 這兩欄
+                    if "Raw Data" in df.columns and "Processed Data" in df.columns:
+                        self.raw_data = df["Raw Data"].tolist()
+                        self.processed_data = df["Processed Data"].tolist()
+                        self.is_load_data = True
+                        self.start_index = 0  # 重置索引
+                        self.plot_data()
 
-                    self.text_display.append(f"成功載入數據:\n  - 檔案: {file_path}")
-                else:
-                    QMessageBox.warning(self, "讀取失敗", "檔案格式錯誤，缺少必要數據欄位！")
+                        self.text_display.append(f"成功載入數據:\n  - 檔案: {file_path}")
+                    else:
+                        QMessageBox.warning(self, "讀取失敗", "檔案格式錯誤，缺少必要數據欄位！")
 
-            except Exception as e:
-                QMessageBox.warning(self, "讀取錯誤", f"讀取 CSV 失敗: {str(e)}")
+                except Exception as e:
+                    QMessageBox.warning(self, "讀取錯誤", f"讀取 CSV 失敗: {str(e)}")
 
 
     def move_left(self):
-        if self.start_index > 0:
-            self.start_index = max(0, self.start_index - SAMPLE_RATE)
-            self.plot_data()
+        if not self.is_recording:
+            if self.start_index > 0:
+                self.start_index = max(0, self.start_index - SAMPLE_RATE)
+                self.plot_data()
 
     def move_right(self):
-        max_length = len(self.raw_data)
-        if self.start_index + MAX_DATA_POINTS < max_length:
-            self.start_index = min(max_length - MAX_DATA_POINTS, self.start_index + SAMPLE_RATE)
-            self.plot_data()
+        if not self.is_recording:
+            max_length = len(self.raw_data)
+            if self.start_index + MAX_DATA_POINTS < max_length:
+                self.start_index = min(max_length - MAX_DATA_POINTS, self.start_index + SAMPLE_RATE)
+                self.plot_data()
 
     def plot_data(self):
         self.ax1.clear()
@@ -590,6 +596,8 @@ class SerialMonitor(QWidget):
 
                 if len(self.raw_data_window) == MAX_DATA_POINTS:
                     self.run_model_inference()
+                    # print(f"raw_data:{len(self.raw_data)}")
+                    # print(f"processed_data:{len(self.processed_data)}")
             else:
                 # 當 Queue 空了，關閉處理執行緒
                 self.processing_event.clear()

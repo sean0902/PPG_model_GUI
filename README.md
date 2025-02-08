@@ -1,5 +1,8 @@
 # 綠光PPG_model_GUI
 
+**執行檔連結**
+https://drive.google.com/drive/folders/1uGHAQIF0yEvxKDxtnc94AtBZzXllGu62?usp=drive_link
+
 **功能**
 1. raw data
 2. 模型推論後的結果

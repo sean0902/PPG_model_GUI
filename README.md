@@ -4,7 +4,7 @@
  https://drive.google.com/drive/folders/1uGHAQIF0yEvxKDxtnc94AtBZzXllGu62?usp=drive_link
 
 **功能**
-1. raw data
+1. 讀取COM PORT原始資料
 2. 模型推論後的結果
 3. 計算心率BMP
 
